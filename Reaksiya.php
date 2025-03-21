@@ -1,50 +1,77 @@
+import sqlite3
 import asyncio
-import random
-from aiogram import Bot, Dispatcher
-from aiogram.types import ReactionTypeEmoji
-from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
+from aiogram.filters import Command
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties  
 
-TOKEN = "7928900640:AAGjxfPanC-r1gqK_r2u2LnCMfvZXwxDcM8"  # O'zingizning bot tokeningizni kiriting
+# ✅ Yangilangan TOKEN va ADMIN ID
+TOKEN = "7928900640:AAE1YKQUQiiTTfFen1pAGyiu6Z48aA6gCSY"
+ADMIN_ID = 1276742
 
-bot = Bot(token=TOKEN)
+# Bot va Dispatcher yaratamiz
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-REACTIONS = ["🔥", "❤️", "👍", "😂", "💯", "😍", "😎", "🎉", "🥳", "👏", "💥", "🤩", "🙌", "😆", "😜",
-"💖", "😊", "😏", "🤗", "🎶", "🚀", "✨", "🐱", "🐶", "🍕", "🎮", "🎯", "🤑", "⚽️", "🏆"]
+# 📌 SQLite BAZA YARATISH
+conn = sqlite3.connect("bot_data.db")
+cursor = conn.cursor()
 
-async def get_admin_channels():
-"""Bot admin bo'lgan kanallarni aniqlash"""
-channels = []
-async with bot:
-updates = await bot.get_updates(limit=100)
-for update in updates:
-if update.my_chat_member:
-chat = update.my_chat_member.chat
-if chat.type == "channel":
-channels.append(chat.id)
-return list(set(channels))
+cursor.execute("""CREATE TABLE IF NOT EXISTS channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE
+)""")
 
-async def react_to_channels():
-"""Admin bo'lgan kanallarda so‘nggi postga emoji bosish"""
-async with bot:
-channels = await get_admin_channels()
-if not channels:
-print("⚠️ Bot hech qaysi kanalga admin emas!")
-return
+cursor.execute("""CREATE TABLE IF NOT EXISTS reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    emoji TEXT
+)""")
+conn.commit()
 
-for channel_id in channels:
-messages = await bot.get_chat_history(channel_id, limit=1)
-if messages:
-last_message = messages[0]
-selected_reactions = random.sample(REACTIONS, min(30, len(REACTIONS)))
-for emoji in selected_reactions:
-await bot.send_reaction(
-chat_id=channel_id,
-message_id=last_message.message_id,
-reaction=[ReactionTypeEmoji(emoji)]
-)
-await asyncio.sleep(0.5)
-await asyncio.sleep(5)
+# ✅ FUNKSIYA: Kanallarni olish
+def get_channels():
+    cursor.execute("SELECT username FROM channels")
+    return [row[0] for row in cursor.fetchall()]
+
+# ✅ FUNKSIYA: Reaksiyalarni olish
+def get_reactions():
+    cursor.execute("SELECT emoji FROM reactions")
+    return [row[0] for row in cursor.fetchall()]
+
+# ✅ POSTLARGA REAKSIYA BOSISH (YANGI VERSIYA UCHUN)
+async def react_to_posts():
+    while True:
+        channels = get_channels()
+        reactions = get_reactions()
+        if not reactions:
+            reactions = ["👍", "❤️", "🔥", "😂", "😃", "💯", "👏"]  # Default emojis
+
+        for channel in channels:
+            try:
+                chat = await bot.get_chat(channel)
+                messages = await bot.get_chat_history(chat.id, limit=1)
+                
+                if messages and messages[0].message_id:
+                    msg_id = messages[0].message_id
+                    
+                    for i in range(30):  # 30 ta reaksiya bosish
+                        emoji = reactions[i % len(reactions)]
+                        await bot.set_message_reaction(
+                            chat_id=chat.id,
+                            message_id=msg_id,
+                            reaction=[ReactionTypeEmoji(emoji=emoji)]
+                        )
+                        await asyncio.sleep(1)  # Sekin reaktsiya bosish
+            except Exception as e:
+                print(f"⚠️ Xatolik: {e}")
+
+        await asyncio.sleep(300)  # Har 5 daqiqada tekshiradi
+
+# ✅ BOTNI ISHGA TUSHIRISH
+async def main():
+    asyncio.create_task(react_to_posts())
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-asyncio.run(react_to_channels())
+    asyncio.run(main())
